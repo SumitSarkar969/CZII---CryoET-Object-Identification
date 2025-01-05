@@ -62,13 +62,8 @@
             "is_particle": false,
             "label": 7,
             "color": [100, 100, 100, 128]
-        },
-        {
-            "name": "background",
-            "is_particle": false,
-            "label": 8,
-            "color": [10, 150, 200, 128]
         }
+
     ],
 
     "overlay_root": "working/overlay",

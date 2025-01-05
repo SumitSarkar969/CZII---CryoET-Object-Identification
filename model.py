@@ -4,6 +4,10 @@ from keras._tf_keras.keras.layers import Input, Conv3D, MaxPooling3D, UpSampling
 from keras._tf_keras.keras.layers import Dropout, concatenate, multiply, Dense, GroupNormalization
 from keras._tf_keras.keras.layers import LeakyReLU
 from keras._tf_keras.keras.optimizers import Adam
+from keras.src.metrics import iou_metrics, F1Score
+from tensorflow.python.keras.metrics import MeanIoU
+
+
 class InstanceNormalization(keras.layers.Layer):
     def __init__(self, **kwargs):
         super(InstanceNormalization, self).__init__(**kwargs)
@@ -15,7 +19,7 @@ class InstanceNormalization(keras.layers.Layer):
 class SE_Layer(keras.layers.Layer):
     def __init__(self, ch, ratio = 16, **kwargs):
         super(SE_Layer, self).__init__(**kwargs)
-        self.gl = GlobalAveragePooling3D(keepdims=True)
+        self.gl = GlobalAveragePooling3D()
         self.fc1 = Dense(ch//ratio, activation='relu')
         self.fc2 = Dense(ch, activation='sigmoid')
     def call(self, input_block):
@@ -34,9 +38,9 @@ def My_LATUP(input_shape: tuple, loss)->keras.Model:
     e1_pc_conv2 = Conv3D(32, (3, 3, 3), strides=(1, 1, 1), activation=LeakyReLU(negative_slope=0.1), padding='same', name='E1_PC_Conv2_Layer')(e1_pc_embed)
     e1_pc_conv3 = Conv3D(32, (5, 5, 5), strides=(1, 1, 1), activation=LeakyReLU(negative_slope=0.1), padding='same', name='E1_PC_Conv3_Layer')(e1_pc_embed)
 
-    e1_pc_maxpool1 = MaxPooling3D(pool_size=(2, 3, 3), name='E1_maxpool1_Layer')(e1_pc_conv1)
-    e1_pc_maxpool2 = MaxPooling3D(pool_size=(2, 3, 3), name='E1_maxpool2_Layer')(e1_pc_conv2)
-    e1_pc_maxpool3 = MaxPooling3D(pool_size=(2, 3, 3), name='E1_maxpool3_Layer')(e1_pc_conv3)
+    e1_pc_maxpool1 = MaxPooling3D(pool_size=(2, 2, 2), name='E1_maxpool1_Layer')(e1_pc_conv1)
+    e1_pc_maxpool2 = MaxPooling3D(pool_size=(2, 2, 2), name='E1_maxpool2_Layer')(e1_pc_conv2)
+    e1_pc_maxpool3 = MaxPooling3D(pool_size=(2, 2, 2), name='E1_maxpool3_Layer')(e1_pc_conv3)
 
     e1_pc_concat = concatenate([e1_pc_maxpool1, e1_pc_maxpool2, e1_pc_maxpool3], name='E1_concat_Layer')
 
@@ -46,7 +50,7 @@ def My_LATUP(input_shape: tuple, loss)->keras.Model:
     e2_instance = InstanceNormalization(name='E2_instance_Layer')(e2_conv1)
     e2_conv2 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='E2_Conv2_Layer')(e2_instance)
     e2_dropout = Dropout(0.2, name='E2_Drop')(e2_conv2)
-    e2_maxpool1 = MaxPooling3D(pool_size=(2, 3, 3), name='E2_maxpool1_Layer')(e2_dropout)
+    e2_maxpool1 = MaxPooling3D(pool_size=(2, 2, 2), name='E2_maxpool1_Layer')(e2_dropout)
 
     #Encoder Block 3 (E3)
     e3_se1 = SE_Layer(64, ratio=8, name='E3_SE1_Layer')(e2_maxpool1)
@@ -69,7 +73,7 @@ def My_LATUP(input_shape: tuple, loss)->keras.Model:
     d3_conv3 = Conv3D(128, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='D3_Conv3_Layer')(d3_dropout)
 
     #Decoder Block 2(D2)
-    d2_up = UpSampling3D(size=(2, 3, 3), name='D2_up')(d3_conv3)
+    d2_up = UpSampling3D(size=(2, 2, 2), name='D2_up')(d3_conv3)
     d2_conv1 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='D2_Conv1_Layer')(d2_up)
     d2_instance = InstanceNormalization(name='D2_instance_Layer')(d2_conv1)
     d2_concat = concatenate([d2_instance, e2_dropout], name='D2_concat_Layer')
@@ -79,7 +83,7 @@ def My_LATUP(input_shape: tuple, loss)->keras.Model:
     d2_conv3 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='D2_Conv3_Layer')(d2_dropout)
 
     #Decoder Block 1(D1)
-    d1_up = UpSampling3D(size=(2, 3, 3), name='D1_up')(d2_conv3)
+    d1_up = UpSampling3D(size=(2, 2, 2), name='D1_up')(d2_conv3)
     d1_conv1 = Conv3D(32, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='D1_Conv1_Layer')(d1_up)
     d1_instance = InstanceNormalization(name='D1_instance_Layer')(d1_conv1)
     d1_concat = concatenate([d1_instance, e1_pc_embed], name='D1_concat_Layer')
@@ -89,8 +93,10 @@ def My_LATUP(input_shape: tuple, loss)->keras.Model:
     d1_conv3 = Conv3D(32, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='D1_Conv3_Layer')(d1_dropout)
 
     #Probablity Filter
-    prob = Conv3D(4, (1, 1, 1), activation='softmax', name='prob')(d1_conv3)
+    prob = Conv3D(7, (1, 1, 1), activation='softmax', name='prob')(d1_conv3)
+
+    output = prob
 
     model = Model(inputs=inputs, outputs=prob, name='MY_LATUP')
-    model.compile(loss=loss, optimizer=Adam(beta_1=0.9, beta_2=0.999, learning_rate=0.0001), metrics=['accuracy'])
+    model.compile(loss=loss, optimizer=Adam(beta_1=0.9, beta_2=0.999, learning_rate=0.0001), metrics=[MeanIoU(num_classes=7, name='IoU')])
     return model
