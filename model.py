@@ -5,7 +5,9 @@ from keras._tf_keras.keras.layers import Dropout, concatenate, multiply, Dense, 
 from keras._tf_keras.keras.layers import LeakyReLU
 from keras._tf_keras.keras.optimizers import Adam
 from keras.src.metrics import iou_metrics, F1Score
-from tensorflow.python.keras.metrics import MeanIoU
+from keras._tf_keras.keras.regularizers import l2
+from keras._tf_keras.keras.initializers import GlorotNormal
+from tensorflow.python.keras.metrics import MeanIoU, accuracy
 
 
 class InstanceNormalization(keras.layers.Layer):
@@ -19,7 +21,7 @@ class InstanceNormalization(keras.layers.Layer):
 class SE_Layer(keras.layers.Layer):
     def __init__(self, ch, ratio = 16, **kwargs):
         super(SE_Layer, self).__init__(**kwargs)
-        self.gl = GlobalAveragePooling3D()
+        self.gl = GlobalAveragePooling3D(keepdims=True)
         self.fc1 = Dense(ch//ratio, activation='relu')
         self.fc2 = Dense(ch, activation='sigmoid')
     def call(self, input_block):
@@ -46,17 +48,17 @@ def My_LATUP(input_shape: tuple, loss)->keras.Model:
 
     #Encoder Block 2 (E2)
     e2_se1 = SE_Layer(96, ratio=8, name='E2_SE1_Layer')(e1_pc_concat)
-    e2_conv1 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='E2_Conv1_Layer')(e2_se1)
+    e2_conv1 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', kernel_regularizer=l2(0.02), name='E2_Conv1_Layer')(e2_se1)
     e2_instance = InstanceNormalization(name='E2_instance_Layer')(e2_conv1)
-    e2_conv2 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='E2_Conv2_Layer')(e2_instance)
+    e2_conv2 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', kernel_regularizer=l2(0.02),name='E2_Conv2_Layer')(e2_instance)
     e2_dropout = Dropout(0.2, name='E2_Drop')(e2_conv2)
     e2_maxpool1 = MaxPooling3D(pool_size=(2, 2, 2), name='E2_maxpool1_Layer')(e2_dropout)
 
     #Encoder Block 3 (E3)
     e3_se1 = SE_Layer(64, ratio=8, name='E3_SE1_Layer')(e2_maxpool1)
-    e3_conv1 = Conv3D(128, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='E3_Conv1_Layer')(e3_se1)
+    e3_conv1 = Conv3D(128, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', kernel_regularizer=l2(0.02), name='E3_Conv1_Layer')(e3_se1)
     e3_instance = InstanceNormalization(name='E3_instance_Layer')(e3_conv1)
-    e3_conv2 = Conv3D(128, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='E3_Conv2_Layer')(e3_instance)
+    e3_conv2 = Conv3D(128, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', kernel_regularizer=l2(0.02), name='E3_Conv2_Layer')(e3_instance)
     e3_dropout = Dropout(0.2, name='E3_drop')(e3_conv2)
     e3_maxpool1 = MaxPooling3D(pool_size=(2, 2, 2), name='E3_maxpool1_Layer')(e3_dropout)
 
@@ -64,23 +66,23 @@ def My_LATUP(input_shape: tuple, loss)->keras.Model:
 
     #Decoder Block 3 (D3)
     d3_up = UpSampling3D(size=(2, 2, 2), name='D3_up')(bn_se1)
-    d3_conv1 = Conv3D(128, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='D3_Conv1_Layer')(d3_up)
+    d3_conv1 = Conv3D(128, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', kernel_regularizer=l2(0.02), name='D3_Conv1_Layer')(d3_up)
     d3_instance = InstanceNormalization(name='D3_instance_Layer')(d3_conv1)
     d3_concat = concatenate([d3_instance, e3_dropout], name='D3_concat_Layer')
-    d3_conv2 = Conv3D(128, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='D3_Conv2_Layer')(d3_concat)
+    d3_conv2 = Conv3D(128, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', kernel_regularizer=l2(0.02), name='D3_Conv2_Layer')(d3_concat)
     d3_se1 = SE_Layer(128, ratio=8, name='D3_SE1_Layer')(d3_conv2)
     d3_dropout = Dropout(0.2, name='D3_drop')(d3_se1)
-    d3_conv3 = Conv3D(128, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='D3_Conv3_Layer')(d3_dropout)
+    d3_conv3 = Conv3D(128, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', kernel_regularizer=l2(0.02), name='D3_Conv3_Layer')(d3_dropout)
 
     #Decoder Block 2(D2)
     d2_up = UpSampling3D(size=(2, 2, 2), name='D2_up')(d3_conv3)
-    d2_conv1 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='D2_Conv1_Layer')(d2_up)
+    d2_conv1 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', kernel_regularizer=l2(0.02), name='D2_Conv1_Layer')(d2_up)
     d2_instance = InstanceNormalization(name='D2_instance_Layer')(d2_conv1)
     d2_concat = concatenate([d2_instance, e2_dropout], name='D2_concat_Layer')
-    d2_conv2 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='D2_Conv2_Layer')(d2_concat)
+    d2_conv2 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', kernel_regularizer=l2(0.02), name='D2_Conv2_Layer')(d2_concat)
     d2_se1 = SE_Layer(64, ratio=8, name='D2_SE1_Layer')(d2_conv2)
     d2_dropout = Dropout(0.2, name='D2_drop')(d2_se1)
-    d2_conv3 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', name='D2_Conv3_Layer')(d2_dropout)
+    d2_conv3 = Conv3D(64, (3, 3, 3), activation=LeakyReLU(negative_slope=0.1), padding='same', kernel_regularizer=l2(0.02), name='D2_Conv3_Layer')(d2_dropout)
 
     #Decoder Block 1(D1)
     d1_up = UpSampling3D(size=(2, 2, 2), name='D1_up')(d2_conv3)
