@@ -1,6 +1,5 @@
 Extracted_Data/
 czii-cryo-et-object-identification.zip
 working/overlay/
-working/test/*.npy
-working/train/*.npy
-test.py
+working/Temp_Data
+test.ipynb
