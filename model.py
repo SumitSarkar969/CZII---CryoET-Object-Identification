@@ -1,8 +1,8 @@
 import keras._tf_keras.keras as keras
 from keras._tf_keras.keras.models import Model
 from keras._tf_keras.keras.layers import Input, Conv3D, MaxPooling3D, UpSampling3D, GlobalAveragePooling3D
-from keras._tf_keras.keras.layers import Dropout, concatenate, multiply, Dense, GroupNormalization
-from keras._tf_keras.keras.layers import LeakyReLU
+from keras._tf_keras.keras.layers import Dropout, concatenate, multiply, Dense, GroupNormalization, BatchNormalization
+from keras._tf_keras.keras.layers import LeakyReLU, Activation
 from keras._tf_keras.keras.optimizers import Adam
 from keras.src.metrics import iou_metrics, F1Score
 from keras._tf_keras.keras.regularizers import l2
@@ -30,7 +30,7 @@ class SE_Layer(keras.layers.Layer):
         x = self.fc2(x)
         return multiply([input_block, x])
 
-# Model
+# Model 1
 def My_LATUP(input_shape: tuple, loss)->keras.Model:
     inputs = Input(input_shape)
 
@@ -101,4 +101,47 @@ def My_LATUP(input_shape: tuple, loss)->keras.Model:
 
     model = Model(inputs=inputs, outputs=prob, name='MY_LATUP')
     model.compile(loss=loss, optimizer=Adam(beta_1=0.9, beta_2=0.999, learning_rate=0.0001), metrics=[MeanIoU(num_classes=7, name='IoU')])
+    return model
+
+
+
+# model 2
+def conv_block(inputs, filters):
+    c1 = Conv3D(filters, kernel_size=(3, 3, 3), padding='same')(inputs)
+    c1 = BatchNormalization()(c1)
+    c1 = Activation(LeakyReLU(negative_slope=0.1))(c1)
+
+    c2 = Conv3D(filters, kernel_size=(3, 3, 3), padding='same')(c1)
+    c2 = BatchNormalization()(c2)
+    c2 = Activation(LeakyReLU(negative_slope=0.1))(c2)
+    return c2
+
+def encoder(inputs, filters):
+    c1 = conv_block(inputs, filters)
+    skip = conv_block(c1, filters)
+    pool = MaxPooling3D(pool_size=(2, 2, 2))(skip)
+    return skip, pool
+
+def decoder(inputs, skip, filters):
+    up_conv = UpSampling3D(size=(2, 2, 2))(inputs)
+    con = concatenate([up_conv, skip])
+    con = conv_block(con, filters)
+    return con
+
+def My_3D_Unet(input_shape, num_classes, loss)->Model:
+    inputs = Input(input_shape)
+
+    skip1, pool1 = encoder(inputs, 32)
+    skip2, pool2 = encoder(pool1, 64)
+    skip3, pool3 = encoder(pool2, 128)
+
+    bridge = conv_block(pool3, 256)
+
+    de3 = decoder(bridge, skip3, 128)
+    de2 = decoder(de3, skip2, 64)
+    de1 = decoder(de2, skip1, 32)
+
+    outputs = Conv3D(num_classes, (1, 1, 1), activation='softmax')(de1)
+    model = Model(inputs=inputs, outputs=outputs, name='My_3D_Unet')
+    model.compile(loss=loss, optimizer=Adam(learning_rate=0.001), metrics=[MeanIoU(num_classes=num_classes, name='IoU')])
     return model
